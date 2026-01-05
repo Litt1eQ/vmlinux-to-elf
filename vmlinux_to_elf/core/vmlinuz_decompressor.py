@@ -224,6 +224,22 @@ def try_decompress_at(input_file : bytes, offset : int) -> bytes:
 
 def obtain_raw_kernel_from_file(input_file: bytes) -> bytes:
     
+    # Avoid false-positives when scanning for compression signatures inside an
+    # already-uncompressed kernel image (e.g. ARM64 `Image` with an embedded
+    # initramfs: it may contain a gzip stream that is not the kernel itself).
+    #
+    # The ARM64 Image header contains the magic "ARM\\x64" ("ARMd") at 0x38.
+    if (
+        len(input_file) >= 0x3C
+        and input_file[0x38:0x3C] == b'ARMd'
+        and not Signature.is_compressed(input_file, 0)
+        and not Signature.check(input_file, 0, Signature.Android_Bootimg)
+        and not Signature.check(input_file, 0, Signature.DTB_Appended_Qualcomm)
+        and not input_file.startswith(b'\x7fELF')
+    ):
+        logging.info('[i] Detected uncompressed ARM64 Image; skipping decompression scan')
+        return input_file
+
     # Check for known signatures at fixed offsets.
     # 
     # Note that mangled semi-correct kernel version strings may be present
